@@ -1,93 +1,76 @@
-function [r, info] = pagerank_power(G, maxIter, tol, alpha)
+function [rank_vec, info, rank_vec_hist] = pagerank_power(A, maxIter, tol, alpha)
+% A(i,j) = 1 means i -> j (is later transposed)
 
-    if nargin < 4 || isempty(alpha), alpha = 0.85; end
-    n = [];
+    if nargin < 4 || isempty(alpha)
+        alpha = 0.85;
+    end
+    
+    n = size(A,1);
 
-    % ---- build adjacency matrix if edge list ----
-    if ~ismatrix(G)
-        error('G must be an adjacency matrix or an edge list (m x 2).');
+    if size(A,2) ~= n
+        error('Adjacency matrix must be square (n x n).');
     end
 
-    if size(G,2) == 2 && size(G,1) >= 1 && ~isequal(size(G,1), size(G,2))
-        % Treat as edge list: [from to]
-        edges = G;
-        if isempty(n)
-            n = max(edges(:));
-        end
-        A = sparse(edges(:,1), edges(:,2), 1, n, n);
-    else
-        % Treat as adjacency matrix
-        A = sparse(G);
-        n = size(A,1);
-        if size(A,2) ~= n
-            error('Adjacency matrix must be square (n x n).');
-        end
-    end
-
-    % ---- validate alpha/tol ----
     if ~(isscalar(alpha) && alpha >= 0 && alpha <= 1)
-        disp(alpha)
-        error('alpha must be a scalar in (0,1).');
+        error('alpha must be a scalar in [0,1].');
     end
+
     if ~(isscalar(tol) && tol > 0)
         error('tol must be a positive scalar.');
     end
 
-    % ---- out-degree (row sum if A(i,j)=i->j) ----
-    outDeg = full(sum(A, 2)); % n x 1
-    dangling = (outDeg == 0);
+    outDeg = full(sum(A,2));
 
-    % ---- initialize rank ----
-    r = ones(n,1) / n;
+    M = zeros(n,n);
 
-    % teleportation vector (uniform)
-    v = ones(n,1) / n;
+    for i = 1:n
+        if outDeg(i) == 0
+            M(i,:) = 1/n;
+        else
+            M(i,:) = A(i,:) / outDeg(i);
+        end
+    end
 
-    % choose iteration mode
+    M = M';
+
+    rank_vec = ones(n,1) / n;
+    teleport = ones(n,1) / n;
+
     fixedIters = (maxIter >= 0);
     if fixedIters
         itLimit = maxIter;
     else
-        itLimit = 10^7; % very high cap for safety
+        itLimit = 1e7;
     end
+
+    rank_vec_hist = rank_vec;
 
     converged = false;
     lastErr = inf;
 
     for k = 1:itLimit
-        r_old = r;
 
-        % ---- power iteration step ----
-        % Distribute rank through links:
-        % For non-dangling nodes i, distribute r(i)/outDeg(i) to its out-neighbors.
-        contrib = r_old ./ max(outDeg, 1);         % avoid divide-by-zero
-        contrib(dangling) = 0;                      % dangling handled separately
+        r_old = rank_vec;
 
-        % r_link = A' * contrib because A(i,j)=i->j contributes to j
-        r_link = A' * contrib;
+        rank_vec = alpha * (M * r_old) + (1 - alpha) * teleport;
 
-        % dangling mass redistributed uniformly
-        dmass = sum(r_old(dangling));
+        rank_vec = rank_vec / sum(rank_vec);
+        sum(rank_vec)
 
-        % PageRank update
-        r = alpha * (r_link + dmass * v) + (1 - alpha) * v;
+        rank_vec_hist(:,end+1) = rank_vec;
 
-        % normalize for numerical stability
-        r = r / sum(r);
-
-        % ---- error check (L1 norm) ----
-        lastErr = norm(r - r_old, 1);
+        lastErr = norm(rank_vec - r_old,1);
 
         if ~fixedIters && lastErr < tol
             converged = true;
-            break;
+            break
         end
+
     end
 
     info = struct();
     info.iters = k;
     info.converged = converged || fixedIters;
     info.lastError = lastErr;
+
 end
-
-
